@@ -44,4 +44,16 @@ always @(posedge clk_in)
       end
   end
 
+
+  //the following will be put into the loop
+  icache _icache(
+    .clk_in(clk_in),		
+    .rst_in(rst_in),		
+	  .rdy_in(rdy_in),	
+    
+  )
+
+
+
+
 endmodule
