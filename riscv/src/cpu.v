@@ -45,7 +45,7 @@ always @(posedge clk_in)
   end
 
 
-  //the following will be put into the loop
+  //the following will be put into the loop above
   icache _icache(
     .clk_in(clk_in),		
     .rst_in(rst_in),		
