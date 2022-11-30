@@ -36,3 +36,18 @@
 `define     SRA     4'd634 
 `define     OR      4'd635 
 `define     AND     4'd636
+
+//[3]=1 operand.
+`define     Add     4'd1000 //+
+`define     Sub     4'd1001 //-
+`define     Or      4'd1002 //|
+`define     Xor     4'd1003 //^    
+`define     And     4'd1004  
+`define     Lshift  4'd1005 //<<
+`define     Rshift  4'd1006 //>>
+`define     Lthan   4'd1007 //<
+`define     Lequal  4'd1008 //<=
+`define     Rthan   4'd1009 //>
+`define     Requal  4'd1010 //>=
+`define     Equal   4'd1011 //==
+`define     Nequal  4'd1012 //!=

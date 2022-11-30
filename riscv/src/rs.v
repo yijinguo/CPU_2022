@@ -10,11 +10,11 @@ module rs #(
     input   wire            from_rob, //1: rob has instr input
     input   wire            entry_in,
     input   wire [31:0]     instr_input
-    input   wire [3:0]     opcode_in,
+    input   wire [3:0]      opcode_in,
     //input wire [4:0]      rd_in,
-    input   wire [4:0]      rs1_in,
+    input   wire [31:0]     Rrs1_in,
     input   wire            rs1_q,
-    input   wire [4:0]      rs2_in,
+    input   wire [31:0]     Rrs2_in,
     input   wire            rs2_q,
     input   wire [31:0]     imm_in,
 
@@ -28,18 +28,21 @@ module rs #(
     
     output  wire            rs_full,
 
-    output  wire            have_execute
+    output  wire            have_execute,
+    output  wire            entry_execute,
+    output  wire[31:0]      result
 );
 
 reg[4:0] dest_entry[RS_SIZE-1:0];
 reg[31:0] instr_origin[RS_SIZE-1:0];
 wire[RS_SIZE-1:0] ready;
-reg [16:0] opcode[RS_SIZE-1:0];
-reg [4:0] vj[RS_SIZE-1:0], vk[RS_SIZE-1:0];
+reg [3:0] opcode[RS_SIZE-1:0];
+reg [31:0] vj[RS_SIZE-1:0], vk[RS_SIZE-1:0];
 wire [RS_SIZE-1:0] qj, qk;
 reg [31:0] imm[RS_SIZE-1:0]; 
 wire rs_num;
 
+wire [3:0] op;
 
 always @(posedge clk_in)begin
     if (rst_in) begin
@@ -55,20 +58,43 @@ always @(posedge clk_in)begin
             dest_entry[rs_num] <= entry_in;
             ready[rs_num] <= 0;
             opcode[rs_num] <= opcode_in;
-            if (rs1_q != 0) begin
-                qj[rs_num] <= rs1_q;
-            end 
-            else begin
-                vj[rs_num] <= rs1_in;
-            end
-            if (rs2_q != 0) begin
-                qk[rs_num] <= rs2_q;
-            end 
-            else begin
-                vk[rs_num] <= rs2_in;
-            end
+            case (opcode_in[2])
+                0:
+                    vj[rs_num] <= ;
+                    vk[rs_num] <= imm_in;
+                    ready[rs_num] <= 1;
+                5:
+                    if (rs1_q != 0) begin
+                        qj[rs_num] <= rs1_q;
+                    end
+                    else begin
+                        vj[rs_num] <= Rrs1_in;
+                        ready[rs_num] <= 1;
+                    end
+                    vk[rs_num] <= imm_in;
+                6: 
+                    if (rs1_q != 0) begin
+                        qj[rs_num] <= rs1_q;
+                    end
+                    else begin
+                        vj[rs_num] <= Rrs1_in;
+                    end
+                    if (rs2_q != 0) begin
+                        qk[rs_num] <= rs2_q;
+                    end
+                    else begin
+                        vk[rs_num] <= Rrs2_in;
+                    end
+                    if (rs1_q == 0 && rs2_q == 0) begin
+                        ready[rs_num] <= 1;
+                    end
+                default: 
+            endcase
             imm[rs_num] <= imm_in;
-            rs_num <= rs_num + 1;    
+            rs_num <= rs_num + 1;  
+            if (rs_num == RS_SIZE - 1) begin
+                assign rs_full = 1;
+            end  
         end
 
         //2.recall the feedback from cdb (commit);
@@ -91,17 +117,61 @@ always @(posedge clk_in)begin
 
         //3.select the ready ones and excute it, push the exe to the alu;
         if (need_execute) begin
-            integer i;
+            integer i, j;
             while (!ready[i] && i!=RS_SIZE) begin
                 i=i+1;
             end
-            if (i==RS_SIZE) begin
+            if (i==rs_num) begin
                 have_execute <= 0;
             end
             else begin
                 have_execute <= 1;
+                //ready, we can execute it
+                assign entry_execute = dest_entry[i];
+                case (opcode)
+                    `AUIPC: assign op = `Add;
+                    `ADDI: assign op = `Add; 
+                    `SLTI: assign op = `Lthan;
+                    `SLTIU: assign op = `Lthan;
+                    `XORI: assign op = `Xor;
+                    `ORI: assign op = `Or;
+                    `ANDI: assign op = `And;
+                    `SLLI: assign op = `Lshift;
+                    `SRLI: assign op = `Rshift;
+                    `SRAI: assign op = `Rshift; 
+                    `ADD: assign op = `Add;
+                    `SUB: assign op = `Sub;
+                    `SLL: assign op = `Lshift;
+                    `SLT: assign op = `Lthan;
+                    `SLTU: assign op = `Lthan;
+                    `XOR: assign op = `Xor;
+                    `SRL: assign op = ``Or;
+                    `SRA: assign op = `Rshift;
+                    `OR: assign op = `Or;
+                    `AND: assign op = `And;
+                    default: 
+                endcase
 
+                Execute ALU(
+                    .op1    (vj[i]), 
+                    .op2    (vk[i]),
+                    .op     (op),
+                    .result (result)); 
+   
+                for (j=i; j<rs_num; j=j+1) begin
+                    dest_entry[j] <= dest_entry[j+1];
+                    instr_origin[j] <= instr_origin[j+1];
+                    ready[j] <= ready[j+1];
+                    opcode[j] <= opcode[j+1];
+                    vj[j] <= vj[j+1];
+                    vk[j] <= vk[j+1];
+                    qj[j] <= qj[j+1];
+                    qk[j] <= qk[j+1];
+                    imm[j] <= imm[j+1];
+                end
+                rs_num <= rs_num-1;
             end
+
         end
 
         
@@ -117,7 +187,7 @@ endmodule
 /*RS的工作
 1.store the instruction from ROB;
 2.recall the feedback from cdb (commit);
-3.select the ready ones and excute it, push the result inti cdb;
+3.select the ready ones and excute it, push the result into cdb;
 */
 
 /*

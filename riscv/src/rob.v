@@ -39,10 +39,10 @@ module rob #(
     output wire [31:0]      instr_output
     output wire [3:0]       opcode_out,
     //output wire [4:0]       rd_out,
-    output wire [4:0]       rs1_out,
-    output wire             rs1_q,
-    output wire [4:0]       rs2_out,
-    output wire             rs2_q,
+    output wire [31:0]      Rrs1_out,
+    output wire             rs1_q_out,
+    output wire [31:0]      Rrs2_out,
+    output wire             rs2_q_out,
     output wire [31:0]      imm_out,
 
     output wire             rob_full,   //1 if full
@@ -69,8 +69,8 @@ wire rob_num; //the next index = the current number
 wire entry_num; //the next entry
 
 reg[4:0] rd[ROB_SIZE-1:0];
-reg[4:0] rs1[ROB_SIZE-1:0];
-reg[4:0] rs2[ROB_SIZE-1:0];
+reg[4:0] rs1[ROB_SIZE-1:0], rs2[ROB_SIZE-1:0];
+wire[ROB_SIZE-1:0] rs1_q, rs2_q;
 reg[31:0] imm[ROB_SIZE-1:0]; 
 
 
@@ -194,7 +194,24 @@ always @(posedge clk_in)
                         endcase
                     default: 
                 endcase
+
                 integer i;
+
+                i = rob_num;
+                while (i>=0 && destType[i] != destType[rob_num] && destination[i] != rs1_if) begin
+                    i=i-1;
+                end
+                if (i>=0) begin
+                    rs1_q[rob_num] <= entry[i];
+                end
+                i = rob_num;
+                while (i>=0 && destType[i] != destType[rob_num] && destination[i] != rs2_if) begin
+                    i=i-1;
+                end
+                if (i>=0) begin
+                    rs2_q[rob_num] <= entry[i];
+                end
+
                 for (i=0; i<rob_num; i=i+1) begin
                     if (destType[i] == destType[rob_num]) begin
                         if (rd_if == rs1_if) begin
@@ -221,8 +238,22 @@ always @(posedge clk_in)
                     assign instr_output = instr_origin[i];
                     assign opcode_out = opcode[i];
                     //assign rd_out = rd[i];
-                    assign rs1_out = rs1[i];
-                    assign rs2_out = rs2[i];
+                    assign rs1_q_out = rs1_q[i];
+                    assign rs2_q_out = rs2_q[i];
+                    if (rs1_q[i] == 0) begin
+                        visit_regfile regfile(
+                            .query_or_modify    (0),
+                            .reg_index          (rs1[i]),
+                            .modify_value       (32'b0),
+                            .query_value        (Rrs1_out));
+                    end
+                    if (rs2_q[i] == 0) begin
+                        visit_regfile regfile(
+                            .query_or_modify    (0),
+                            .reg_index          (rs2[i]),
+                            .modify_value       (32'b0),
+                            .query_value        (Rrs2_out));
+                    end                    
                     assign imm_out = imm[i];
                     case (opcode[i][2])
                         1:  assign is_jump = 1; 
@@ -242,8 +273,7 @@ always @(posedge clk_in)
                     i=i+1;
                 end
                 if (i<rob_num) begin
-                    //todo
-                    destination[i] = destination_modify;
+                    //destination[i] = destination_modify;
                     value[i] = value_modify;
                 end
             end
