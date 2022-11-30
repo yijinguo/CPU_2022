@@ -33,7 +33,7 @@ module rs #(
     output  wire[31:0]      result
 );
 
-reg[4:0] dest_entry[RS_SIZE-1:0];
+wire [RS_SIZE-1:0] dest_entry[RS_SIZE-1:0];
 reg[31:0] instr_origin[RS_SIZE-1:0];
 wire[RS_SIZE-1:0] ready;
 reg [3:0] opcode[RS_SIZE-1:0];
@@ -152,7 +152,7 @@ always @(posedge clk_in)begin
                     default: 
                 endcase
 
-                Execute ALU(
+                ALU Execute(
                     .op1    (vj[i]), 
                     .op2    (vk[i]),
                     .op     (op),
@@ -187,7 +187,7 @@ endmodule
 /*RS的工作
 1.store the instruction from ROB;
 2.recall the feedback from cdb (commit);
-3.select the ready ones and excute it, push the result into cdb;
+3.select the ready ones and execute it, push the result into cdb;
 */
 
 /*

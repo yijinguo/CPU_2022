@@ -38,7 +38,7 @@ module rob #(
     output wire             entry_out,
     output wire [31:0]      instr_output
     output wire [3:0]       opcode_out,
-    //output wire [4:0]       rd_out,
+    //output wire [4:0]     rd_out,
     output wire [31:0]      Rrs1_out,
     output wire             rs1_q_out,
     output wire [31:0]      Rrs2_out,
@@ -241,14 +241,14 @@ always @(posedge clk_in)
                     assign rs1_q_out = rs1_q[i];
                     assign rs2_q_out = rs2_q[i];
                     if (rs1_q[i] == 0) begin
-                        visit_regfile regfile(
+                        regfile visit_regfile(
                             .query_or_modify    (0),
                             .reg_index          (rs1[i]),
                             .modify_value       (32'b0),
                             .query_value        (Rrs1_out));
                     end
                     if (rs2_q[i] == 0) begin
-                        visit_regfile regfile(
+                        regfile visit_regfile (
                             .query_or_modify    (0),
                             .reg_index          (rs2[i]),
                             .modify_value       (32'b0),
@@ -307,6 +307,9 @@ always @(posedge clk_in)
                     end
                     rob_num <= rob_num-1;
                 end     
+                else begin
+                    entry_commit <= 0;
+                end
             end
         end
     end
