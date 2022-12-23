@@ -9,6 +9,7 @@ module icache #(
 
     //branch predict
     //todo
+    input wire            stop,
     
     //input wire            input_valid,  //1 if need to input new instruction
     input wire [31:0]     input_instr,  //new instruction input
@@ -42,15 +43,14 @@ always @(posedge clk_in)
       end
     else
       begin
-        if (pc_update)
-          begin
-            valid <= 0;
-            index_head <= 0;
-            index_tail <= 0;
-            current_pc_address <= pc_address;
-            not_full <= 1;
-          end
-        if (not_full) 
+        if (pc_update) begin
+          valid <= 0;
+          index_head <= 0;
+          index_tail <= 0;
+          current_pc_address <= pc_address;
+          not_full <= 1;
+        end
+        if (not_full && !stop) 
           begin
             instr_cache[index_tail] <= input_instr;
             valid[index_tail] <= 1;

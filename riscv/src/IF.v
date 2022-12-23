@@ -17,6 +17,7 @@ module IF #(
   output wire [4:0]   rs1_out,
   output wire [4:0]   rs2_out,
   output wire [31:0]  imm_out,
+  output wire         if_branch,
   output wire         IF_full,
   output wire         IF_empty
 
@@ -56,7 +57,9 @@ always @(posedge clk_in)
             7'b0010111: imm[queue_num][31:12] <= icache_instr_input[31:12];                    
             7'b1101111: imm[queue_num][20|10:1|11|19:12] <= icache_instr_input[31:12]; 
             7'b1100111: imm[queue_num][11:0] <= icache_instr_input[31:20];
-            7'b1100011: imm[queue_num][12|10:5] <= icache_instr_input[31:25];
+            7'b1100011: 
+              imm[queue_num][12|10:5] <= icache_instr_input[31:25];
+              if_branch <= 1;
             7'b0000011: imm[queue_num][11:0] <= icache_instr_input[31:20];
             7'b0100011: 
               imm[queue_num][11:5] <= icache_instr_input[31:25];

@@ -29,8 +29,10 @@ module rob #(
     //if have cdb feedback
     input wire              have_modify,
     input wire              entry_modify,
-    input wire[4:0]         destination_modify,
+    //input wire[4:0]         destination_modify,
     input wire[31:0]        value_modify,
+    input wire              if_pc_change_modify,
+    input wire[31:0]        pc_address_modify,
 
     //if need output
     output wire             is_jump, //1 is jump
@@ -38,6 +40,7 @@ module rob #(
     output wire             entry_out,
     output wire [31:0]      instr_output
     output wire [3:0]       opcode_out,
+    output wire [31:0]      pc_address_out,
     //output wire [4:0]     rd_out,
     output wire [31:0]      Rrs1_out,
     output wire             rs1_q_out,
@@ -51,9 +54,10 @@ module rob #(
     //if need commit
     output wire             entry_commit,
     output wire             destType_commit, //0: mem; 1: reg; 2:branch; 3:jl(jump&link)
+    output wire             if_pc_change_commit,
+    output wire[31:0]       new_pc_address_commit,
     output wire[4:0]        destination_commit,
     output wire[31:0]       value_commit
-
 );
 //riscv_instruction
 reg[ROB_SIZE-1:0] entry; //.
@@ -64,6 +68,7 @@ reg[ROB_SIZE-1:0] destType; //0: mem; 1: reg; 2:branch; 3:jl(jump&link)
 reg[4:0] destination[ROB_SIZE-1:0];
 reg[31:0] value[ROB_SIZE-1:0];
 reg[31:0] pc_value[ROB_SIZE-1:0]; //.
+wire[ROB_SIZE-1:0] pc_change; //.
 
 wire rob_num; //the next index = the current number 
 wire entry_num; //the next entry
@@ -237,6 +242,7 @@ always @(posedge clk_in)
                     assign entry_out = entry[i];
                     assign instr_output = instr_origin[i];
                     assign opcode_out = opcode[i];
+                    assign pc_address_out = pc_value[i];
                     //assign rd_out = rd[i];
                     assign rs1_q_out = rs1_q[i];
                     assign rs2_q_out = rs2_q[i];
@@ -273,7 +279,6 @@ always @(posedge clk_in)
                     i=i+1;
                 end
                 if (i<rob_num) begin
-                    //destination[i] = destination_modify;
                     value[i] = value_modify;
                 end
             end
