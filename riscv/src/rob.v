@@ -8,13 +8,11 @@ After an instruction is committed, the whole queue will be traersed and moved fo
 `include "define.v"
 
 module rob #(
-    parameter ROB_SIZE = 10; //can be modified
+    parameter ROB_SIZE = 10 //can be modified
 )(
     input wire              clk_in,
     input wire              rst_in,
 	input wire		        rdy_in,
-
-    input wire              output_or_commit; //0 for doing nothing, 1 for instr_output, 2 for if_commit 
 
     //if have instr input
     input wire              have_input,
@@ -27,31 +25,39 @@ module rob #(
     input wire [31:0]       imm_if,
 
     //if have cdb feedback
-    input wire              have_modify,
-    input wire              entry_modify,
-    //input wire[4:0]         destination_modify,
-    input wire[31:0]        value_modify,
-    input wire              if_pc_change_modify,
-    input wire[31:0]        pc_address_modify,
+    input   wire            have_cdb_rs,
+    input   wire            entry_cdb_rs,
+    input   wire [31:0]     value_cdb_rs,
+    input   wire            have_cdb_branch,
+    input   wire            entry_cdb_branch,
+    input   wire [31:0]     value_cdb_branch,
+    input   wire            have_cdb_slb,
+    input   wire            entry_cdb_slb,
+    input   wire [31:0]     value_cdb_slb,
+
+    output  reg             rd_cdb_rs,
+    output  reg             new_entry_cdb_rs,
+    output  reg             rd_cdb_branch,
+    output  reg             new_entry_cdb_branch,
+    output  reg             rd_cdb_slb,
+    output  reg             new_entry_cdb_slb,
 
     //if need output
-    output wire             is_jump, //1 is jump
-    output wire             slb_or_rs_or_pc,  //0 arrive slb, 1 arrive rs, 2 arrive pc(branch)
+    output wire             have_out,
+    output reg              is_jump, //1 is jump
+    output reg              slb_or_rs_or_pc,  //0 arrive slb, 1 arrive rs, 2 arrive pc(branch)
     output wire             entry_out,
-    output wire [31:0]      instr_output
     output wire [3:0]       opcode_out,
     output wire [31:0]      pc_address_out,
-    //output wire [4:0]     rd_out,
-    output wire [31:0]      Rrs1_out,
-    output wire             rs1_q_out,
-    output wire [31:0]      Rrs2_out,
-    output wire             rs2_q_out,
+    output wire [4:0]       rd_out,
+    output wire [ 4:0]      rs1_out,
+    output wire [ 4:0]      rs2_out,
     output wire [31:0]      imm_out,
 
-    output wire             rob_full,   //1 if full
-    output wire             rob_empty,  //1 if empty       
+    output wire             rob_full,   //1 if full    
 
     //if need commit
+    output wire             have_commit,
     output wire             entry_commit,
     output wire             destType_commit, //0: mem; 1: reg; 2:branch; 3:jl(jump&link)
     output wire             if_pc_change_commit,
@@ -59,68 +65,136 @@ module rob #(
     output wire[4:0]        destination_commit,
     output wire[31:0]       value_commit
 );
-//riscv_instruction
-reg[ROB_SIZE-1:0] entry; //.
-reg[31:0] instr_origin[ROB_SIZE-1:0]; //.
+
+reg[ROB_SIZE-1:0] entry; 
+reg[31:0] instr_origin[ROB_SIZE-1:0]; 
 reg[ROB_SIZE-1:0] state; //0:initial, 1:pending, 2:ready  
-reg[3:0] opcode[ROB_SIZE-1:0]; //.
 reg[ROB_SIZE-1:0] destType; //0: mem; 1: reg; 2:branch; 3:jl(jump&link)
+reg[3:0] opcode[ROB_SIZE-1:0]; 
 reg[4:0] destination[ROB_SIZE-1:0];
 reg[31:0] value[ROB_SIZE-1:0];
-reg[31:0] pc_value[ROB_SIZE-1:0]; //.
-wire[ROB_SIZE-1:0] pc_change; //.
+reg[31:0] pc_value[ROB_SIZE-1:0]; 
+reg[ROB_SIZE-1:0] pc_change; 
 
-wire rob_num; //the next index = the current number 
-wire entry_num; //the next entry
+integer rob_num; //the next index = the current number 
+integer entry_num; //the next entry
 
 reg[4:0] rd[ROB_SIZE-1:0];
 reg[4:0] rs1[ROB_SIZE-1:0], rs2[ROB_SIZE-1:0];
-wire[ROB_SIZE-1:0] rs1_q, rs2_q;
 reg[31:0] imm[ROB_SIZE-1:0]; 
 
+integer i, j;
+reg destination_cdb;
 
-always @(posedge clk_in)
-    begin
-        if (rst_in) begin
-            rob_num <= 0;
-            entry_num <= 1;
-        end
-        else if (!rdy_in) begin
+assign rob_full = (rob_num == ROB_SIZE - 2);
 
-        end
-        else begin
-            //1.store the instruction from IF;
-            if (have_input && rob_num < ROB_SIZE-1) begin
-                entry[rob_num] <= entry_num;
-                instr_origin[rob_num] <= instr_input;
-                pc_value[rob_num] <= instr_input_pc;
-                rd[rob_num] <= rd_if;
-                rs1[rob_num] <= rs1_if;
-                rs2[rob_num] <= rs2_if;
-                imm[rob_num] <= imm_if;
-                case (opcode_if[6:0])
-                    7'b0110111:  //LUI //rd, imm
+//2.fetch output
+//遍历state，找到最上层的0(未被推入任何其他部件)，推入相应位置
+initial begin
+    i = 0;
+    while (state[i] != 0 && i < rob_num) i=i+1;
+    if (i < rob_num) begin
+        case (opcode[i][2])
+            1:  is_jump = 1; 
+            2:  slb_or_rs_or_pc = 2;
+            3:  slb_or_rs_or_pc = 0;
+            4:  slb_or_rs_or_pc = 0;
+            default:  slb_or_rs_or_pc = 1;
+        endcase
+    end
+    else begin
+        slb_or_rs_or_pc = 3;
+    end 
+end
+
+assign have_out = (i<rob_num);
+assign entry_out = entry[i];
+assign opcode_out = opcode[i];
+assign pc_address_out = pc_value[i];
+assign rd_out = rd[i];
+assign rs1_out = rs1[i];
+assign rs2_out = rs2[i];
+assign imm_out = imm[i];
+
+
+//4.if output_or_commit == commit
+//遍历state，找到最上层的2(可被commit的状态)，并通知相应部件进行执行，推出该指令, 并将整个rob向前移位
+initial begin
+    j = 0;
+    while (state[j] != 2 && j < rob_num) j=j+1;
+    i = 0;
+    for (i=j;i<rob_num;i=i+1) begin
+        entry[i-1] <= entry[i];
+        instr_origin[i-1] <= entry[i];
+        state[i-1] <= state[i];
+        opcode[i-1] <= opcode[i];
+        destType[i-1] <= destType[i];
+        destination[i-1] <= destination[i];
+        value[i-1] <= value[i];
+        pc_value[i-1] <= pc_value[i];
+        rd[i-1] <= rd[i];
+        rs1[i-1] <= rs1[i];
+        rs2[i-1] <= rs2[i];
+        imm[i-1] <= imm[i];
+    end
+    rob_num <= rob_num-1;
+end
+
+assign have_commit = (j<rob_num);
+assign entry_commit = (j<rob_num) ? entry[j] : 0;
+assign destType_commit = destType[j];
+assign destination_commit = destination[j]; 
+assign value_commit = value[j];    
+
+always @(posedge clk_in) begin
+    if (rst_in) begin
+        rob_num <= 0;
+        entry_num <= 1;
+    end
+    else if (!rdy_in) begin
+
+    end
+    else begin
+        //1.store the instruction from IF;
+        if (have_input && rob_num < ROB_SIZE-1) begin
+            rob_num <= rob_num + 1;
+            entry_num <= (entry_num == ROB_SIZE) ? 1 : (entry_num + 1);
+            entry[rob_num] <= entry_num;
+            instr_origin[rob_num] <= instr_input;
+            pc_value[rob_num] <= instr_input_pc;
+            rd[rob_num] <= rd_if;
+            rs1[rob_num] <= rs1_if;
+            rs2[rob_num] <= rs2_if;
+            imm[rob_num] <= imm_if;
+            case (opcode_if[6:0])
+                    7'b0110111: begin //LUI //rd, imm 
                         opcode[rob_num] <= `LUI;
                         destType[rob_num] <= 1;
                         destination[rob_num] <= rd_if;
                         value[rob_num] <= imm_if;
                         state[rob_num] <= 2;
-                    7'b0010111: //AUIPC //rd, imm
+                    end
+                    7'b0010111: begin //AUIPC //rd, imm
                         opcode[rob_num] <= `AUIPC;
                         destType[rob_num] <= 1;
                         destination[rob_num] <= rd_if;
                         state[rob_num] <= 0;
-                    7'b1101111: //JAL //rd, imm
+                    end
+                    7'b1101111: begin //JAL //rd, imm
                         opcode[rob_num] <= `JAL;
                         destType[rob_num] <= 3;
                         destination[rob_num] <= rd_if;
                         state[rob_num] <= 0;
-                    7'b1100111: //JALR //rd, rs1, imm
+                        pc_change[rob_num] <= 1;
+                    end
+                    7'b1100111: begin//JALR //rd, rs1, imm
                         opcode[rob_num] <= `JALR;
                         destType[rob_num] <= 3;
                         destination[rob_num] <= rd_if;
                         state[rob_num] <= 0;
-                    7'b1100011: //Branch //rs1, rs2, imm
+                        pc_change[rob_num] <= 1;
+                    end
+                    7'b1100011: begin //Branch //rs1, rs2, imm
                         destType[rob_num] <= 2;
                         state[rob_num] <= 0;
                         case (opcode_if[9:7])
@@ -130,9 +204,10 @@ always @(posedge clk_in)
                             3'b101: opcode[rob_num] <= `BGE;
                             3'b110: opcode[rob_num] <= `BLTU;
                             3'b111: opcode[rob_num] <= `BGEU;
-                            default: 
+                            default: opcode[rob_num] <= 0;
                         endcase
-                    7'b0000011: //Load //rd, rs1, imm
+                    end
+                    7'b0000011: begin //Load //rd, rs1, imm
                         destType[rob_num] <= 1;
                         destination[rob_num] <= rd_if;
                         state[rob_num] <= 0;
@@ -142,18 +217,20 @@ always @(posedge clk_in)
                             3'b010: opcode[rob_num] <= `LW;
                             3'b100: opcode[rob_num] <= `LBU;
                             3'b101: opcode[rob_num] <= `LHU;
-                            default:  
+                            default: ; 
                         endcase
-                    7'b0100011: //Store //rs1, rs2, imm
+                    end
+                    7'b0100011: begin //Store //rs1, rs2, imm
                         destType[rob_num] <= 0;
                         state[rob_num] <= 0;
                         case (opcode_if[9:7])
                             3'b000: opcode[rob_num] <= `SB;
                             3'b001: opcode[rob_num] <= `SH;
                             3'b010: opcode[rob_num] <= `SW;
-                            default: 
+                            default: ;
                         endcase
-                    7'b0010011: //expi //need rd, rs1, imm
+                    end
+                    7'b0010011: begin //expi //need rd, rs1, imm
                         destType[rob_num] <= 1;
                         destination[rob_num] <= rd_if;
                         state[rob_num] <= 0;
@@ -169,10 +246,11 @@ always @(posedge clk_in)
                             case (opcode_if[16:10])
                                 7'b0000000: opcode[rob_num] <= `SRLI;
                                 7'b0100000: opcode[rob_num] <= `SRAI;
-                                default: 
+                                default: ;
                             endcase
                         endcase
-                    7'b0110011:  //exp //need rd, rs1, rs2
+                    end
+                    7'b0110011: begin //exp //need rd, rs1, rs2
                         destType[rob_num] <= 1;
                         destination[rob_num] <= rd_if;
                         state[rob_num] <= 0;
@@ -181,144 +259,84 @@ always @(posedge clk_in)
                             case (opcode_if[16:10])
                                 7'b0000000: opcode[rob_num] <= `ADD;
                                 7'b0100000: opcode[rob_num] <= `SUB;
-                                default: 
+                                default: ;
                             endcase
                             3'b001: opcode[rob_num] <= `SLL;
                             3'b010: opcode[rob_num] <= `SLT;
                             3'b011: opcode[rob_num] <= `SLTU;
                             3'b100: opcode[rob_num] <= `XOR;
-                            3'b101: 
-                            case (opcode_if[16:10])
-                                7'b0000000: opcode[rob_num] <= `SRL;
-                                7'b0100000: opcode[rob_num] <= `SRA;
-                                default: 
-                            endcase
+                            3'b101: begin
+                                case (opcode_if[16:10])
+                                    7'b0000000: opcode[rob_num] <= `SRL;
+                                    7'b0100000: opcode[rob_num] <= `SRA;
+                                    default: ;
+                                endcase
+                            end
                             3'b110: opcode[rob_num] <= `OR;
                             3'b111: opcode[rob_num] <= `AND;
-                            default: 
+                            default: ;
                         endcase
-                    default: 
-                endcase
-
-                integer i;
-
-                i = rob_num;
-                while (i>=0 && destType[i] != destType[rob_num] && destination[i] != rs1_if) begin
-                    i=i-1;
-                end
-                if (i>=0) begin
-                    rs1_q[rob_num] <= entry[i];
-                end
-                i = rob_num;
-                while (i>=0 && destType[i] != destType[rob_num] && destination[i] != rs2_if) begin
-                    i=i-1;
-                end
-                if (i>=0) begin
-                    rs2_q[rob_num] <= entry[i];
-                end
-
-                for (i=0; i<rob_num; i=i+1) begin
-                    if (destType[i] == destType[rob_num]) begin
-                        if (rd_if == rs1_if) begin
-                            rs1_q = i;
-                        end
-                        if (rd_if == rs2_if) begin
-                            rs2_q = i;
-                        end
                     end
-                end
-                rob_num <= rob_num + 1;
-                entry_num <= (entry_num == ROB_SIZE) 1 : (entry_num + 1);
-            end   
+                    default: ; 
+            endcase
+        end 
 
-            //2.if output_or_commit == output
-            if (output_or_commit == 1) begin
-                //遍历state，找到最上层的0(未被推入任何其他部件)，推入相应位置
-                integer i;
-                while (state[i] != 0 && i < rob_num) begin
-                    i=i+1;
-                end
-                if (i < rob_num) begin
-                    assign entry_out = entry[i];
-                    assign instr_output = instr_origin[i];
-                    assign opcode_out = opcode[i];
-                    assign pc_address_out = pc_value[i];
-                    //assign rd_out = rd[i];
-                    assign rs1_q_out = rs1_q[i];
-                    assign rs2_q_out = rs2_q[i];
-                    if (rs1_q[i] == 0) begin
-                        regfile visit_regfile(
-                            .query_or_modify    (0),
-                            .reg_index          (rs1[i]),
-                            .modify_value       (32'b0),
-                            .query_value        (Rrs1_out));
-                    end
-                    if (rs2_q[i] == 0) begin
-                        regfile visit_regfile (
-                            .query_or_modify    (0),
-                            .reg_index          (rs2[i]),
-                            .modify_value       (32'b0),
-                            .query_value        (Rrs2_out));
-                    end                    
-                    assign imm_out = imm[i];
-                    case (opcode[i][2])
-                        1:  assign is_jump = 1; 
-                        2:  assign slb_or_rs_or_pc = 2;
-                        3:  assign slb_or_rs_or_pc = 0;
-                        4:  assign slb_or_rs_or_pc = 0;
-                        default: 
-                            assign slb_or_rs_or_pc = 1;
-                    endcase
-                end
-            end 
-
-            //3.recall the feedback from cdb
-            if (have_modify) begin
-                integer i;
-                while (entry[i] != entry_modify && i<rob_num) begin
-                    i=i+1;
-                end
-                if (i<rob_num) begin
-                    value[i] = value_modify;
-                end
-            end
-
-            //4.if output_or_commit == commit
-            if (output_or_commit == 2) begin
-                //遍历state，找到最上层的2(可被commit的状态)，并通知相应部件进行执行，推出该指令, 并将整个rob向前移位
-                integer j;
-                while (state[j] != 2 && j < rob_num) begin
-                    j = j + 1;
-                end
-                if (j < rob_num) begin
-                    assign entry_commit = entry[j];
-                    assign destType_commit = destType[j];
-                    assign destination_commit = destination[j]; 
-                    assign value_commit = value[j];
-                    integer i;
-                    for (i=j;i<rob_num;i=i+1) begin
-                        entry[i-1] <= entry[i];
-                        instr_origin[i-1] <= entry[i];
-                        state[i-1] <= state[i];
-                        opcode[i-1] <= opcode[i];
-                        destType[i-1] <= destType[i];
-                        destination[i-1] <= destination[i];
-                        value[i-1] <= value[i];
-                        pc_value[i-1] <= pc_value[i];
-                        rd[i-1] <= rd[i];
-                        rs1[i-1] <= rs1[i];
-                        rs2[i-1] <= rs2[i];
-                        imm[i-1] <= imm[i];
-                    end
-                    rob_num <= rob_num-1;
-                end     
-                else begin
-                    entry_commit <= 0;
-                end
-            end
+        //3.recall the feedback from cdb
+        if (have_cdb_rs) begin
+            i=0;
+            while (i<rob_num && entry[i] != entry_cdb_rs) i=i+1;
+            value[i] <= value_cdb_rs;
+            rd_cdb_rs <= destination[i];
+            state[i] <= 2;
+            j=i+1;
+            while (j<rob_num && destination[j]!=destination[i]) j=j+1;
+            new_entry_cdb_rs <= entry[j];
         end
+        if (have_cdb_branch) begin
+            i=0;
+            while (i<rob_num && entry[i] != entry_cdb_branch) i=i+1;
+            value[i] <= value_cdb_branch;
+            rd_cdb_branch <= destination[i];
+            state[i] <= 2;
+            j=i+1;
+            while (j<rob_num && destination[j]!=destination[i]) j=j+1;
+            new_entry_cdb_branch <= entry[j];
+        end
+        if (have_cdb_slb) begin
+            i=0;
+            while (i<rob_num && entry[i] != entry_cdb_slb) i=i+1;
+            value[i] <= value_cdb_slb;
+            rd_cdb_slb <= destination[i];
+            state[i] <= 2;
+            j=i+1;
+            while (j<rob_num && destination[j]!=destination[i]) j=j+1;
+            new_entry_cdb_slb <= entry[j];
+        end
+        
     end
+end    
     
+//将最后一个rob的信息输入regfile
+regfile reg_qurey(
+    .clk_in     (clk_in),
+    .rst_in     (rst_in),
+    .rdy_in     (rdy_in),
+
+    .query      (0),
+    .reorder        (1),
+    .reorder_entry  (entry[rob_num]),
+    .reorder_rd     (destination[rob_num]),
+    
+    .modify         (0),
+    .modify_entry   (0),
+    .modify_index   (0),
+    .modify_value   (0),
+
+    .query_entry    (),
+    .query_value    ()
+);
+
+
 endmodule
 
 

@@ -7,17 +7,19 @@ sim_testcase = $(prefix)/testcase/sim
 fpga_testcase = $(prefix)/testcase/fpga
 
 sim = $(prefix)/sim
-riscv_toolchain = /opt/riscv
+#riscv_toolchain = /mnt/c/Users/guoyijin_繁花似锦/github/CPU_2022/riscv/riscv-toolchain
+riscv_toolchain = /home/guoyijin
 riscv_bin = $(riscv_toolchain)/bin
 sys = $(prefix)/sys
 
-_no_testcase_name_check:
-	@$(if $(strip $(name)),, echo 'Missing Testcase Name')
-	@$(if $(strip $(name)),, exit 1)
+name = bulgarian
+#_no_testcase_name_check:
+#	@$(if $(strip $(name)),, echo 'Missing Testcase Name')
+#	@$(if $(strip $(name)),, exit 1)
 
 # All build result are put at testspace
 build_sim:
-	@cd $(src) && iverilog -o $(testspace)/test $(sim)/testbench.v $(src)/common/block_ram/*.v $(src)/common/fifo/*.v $(src)/common/uart/*.v $(src)/*.vh $(src)/*.v
+	@cd $(src) && iverilog -o $(testspace)/test $(sim)/testbench.v $(src)/common/block_ram/*.v $(src)/common/fifo/*.v $(src)/common/uart/*.v $(src)/*.v
 
 build_sim_test: _no_testcase_name_check
 	@$(riscv_bin)/riscv32-unknown-elf-as -o $(sys)/rom.o -march=rv32i $(sys)/rom.s
